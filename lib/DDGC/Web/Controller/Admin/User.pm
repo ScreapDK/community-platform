@@ -23,12 +23,19 @@ sub user_base :Chained('base') :PathPart('view') :CaptureArgs(1) {
 		$c->response->redirect($c->chained_uri('Admin::User','index',{ user_not_found => 1 }));
 		return $c->detach;
 	}
-	for (keys %{$c->d->all_roles}) {
+	my $roles = $c->d->config->roles;
+	# While allowing admin promotion from the interface might some day
+	# be the preferred approach, for now a mis-click which promotes an
+	# admin blocks the ability to demote them afterwards.
+	# Delete 'admin' from the user classes.
+	delete $roles->{ $c->d->config->id_for_role('admin') };
+	$c->stash->{roles} = $roles;
+	for (map { $roles->{$_}->{role} } keys $roles ) {
 		if (defined $c->req->params->{$_}) {
 			$c->require_action_token;
 			$c->req->param($_)
-				? $c->stash->{user}->add_flag($_)
-				: $c->stash->{user}->del_flag($_)
+				? $c->stash->{user}->add_role($_)
+				: $c->stash->{user}->del_role($_)
 		}
 	}
 	if (defined $c->req->params->{ghosted}) {
@@ -36,6 +43,10 @@ sub user_base :Chained('base') :PathPart('view') :CaptureArgs(1) {
 		$c->req->param('ghosted')
 			? $c->stash->{user}->ghosted(1)
 			: $c->stash->{user}->ghosted(0)
+	}
+	if (defined $c->req->params->{unsub}) {
+		$c->require_action_token;
+		$c->stash->{user}->unsubscribe_all_notifications;
 	}
 	if (defined $c->req->params->{ignore}) {
 		$c->require_action_token;

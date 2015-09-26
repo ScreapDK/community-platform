@@ -9,6 +9,7 @@ use Email::MIME;
 use Email::Sender::Transport::SMTP;
 use Email::Sender::Transport::Sendmail;
 use Email::Sender::Transport::Test;
+use HTML::FormatText::WithLinks;
 use Data::Dumper;
 use IO::All;
 
@@ -37,8 +38,20 @@ sub _build_transport {
 	return Email::Sender::Transport::SMTP->new({ %smtp_args });
 }
 
+has plaintext_formatter => (
+	isa => 'HTML::FormatText::WithLinks',
+	is  => 'ro',
+	lazy_build => 1,
+);
+sub _build_plaintext_formatter {
+	HTML::FormatText::WithLinks->new(
+		unique_links => 1,
+	);
+}
+
 sub mail {
-	my ( $self, $to, $from, $subject, $body, %extra_headers ) = @_;
+	my ( $self, $verified, $to, $from, $subject, $body, %extra_headers ) = @_;
+	return unless $verified;
 	die __PACKAGE__."->mail needs to, from, subject, body" unless $body && $subject && $to && $from;
 	$subject =~ s/\n/ /g;
 	my $email = Email::Simple->create(
@@ -59,14 +72,16 @@ sub mail {
 }
 
 sub template_mail {
-	my ( $self, $to, $from, $subject, $template, $stash, %extra ) = @_;
+	my ( $self, $verified, $to, $from, $subject, $template, $stash, %extra ) = @_;
+	return unless $verified;
 	$stash->{email_template} = "email/".$template.".tx";
 	my $body = $self->ddgc->xslate->render('email/base.tx',$stash);
-	return $self->html_mail($to, $from, $subject, $body, %extra);
+	return $self->html_mail($verified, $to, $from, $subject, $body, %extra);
 }
 
 sub html_mail {
-	my ( $self, $to, $from, $subject, $body, %extra ) = @_;
+	my ( $self, $verified, $to, $from, $subject, $body, %extra ) = @_;
+	return unless $verified;
 	die __PACKAGE__."->mail needs to, from, subject, body" unless $body && $subject && $to && $from;
 
 	my @parts = defined $extra{parts}
@@ -84,6 +99,13 @@ sub html_mail {
 			%extra,
 		],
 		parts => [
+			Email::MIME->create(
+				attributes => {
+					content_type => 'text/plain; charset="UTF-8"',
+					content_transfer_encoding => '8bit',
+				},
+				body => $self->plaintext_formatter->parse($body),
+			),
 			Email::MIME->create(
 				attributes => {
 					content_type => 'text/html; charset="UTF-8"',

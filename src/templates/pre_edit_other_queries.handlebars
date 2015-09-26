@@ -12,11 +12,13 @@
                 {{#if live.other_queries}}
                     {{#each live.other_queries}}
                         <li class="editpage">
-                            <span title="try this example on DuckDuckGo" name="other_queries" class="pre_edit other-examples">
+                            <span title="try this example on DuckDuckGo" name="other_queries" class="pre_edit other_queries">
                                 {{this}}
                             </span>
                         </li>
                     {{/each}}
+                {{else}}
+                    —
                 {{/if}}
             </ul>
         </div>
@@ -27,7 +29,7 @@
                 {{#if edited.other_queries}}
                     {{#each edited.other_queries}}
                         <li class="editpage">
-                            <span title="try this example on DuckDuckGo" name="other_queries" class="pre_edit other-examples">
+                            <span title="try this example on DuckDuckGo" name="other_queries" class="pre_edit other_queries">
                                 {{this}}
                             </span>
                         </li>

@@ -33,15 +33,32 @@ column body => {
 column tags => {
 	data_type => 'text',
 	is_nullable => 1,
+    serializer_class => 'JSON',
 };
 
 column repo => {
 	data_type => 'text',
 };
+
+column is_pr => {
+    data_type => 'text',
+    is_nullable => 1,
+};
+
+column date => {
+    data_type => 'text',
+    is_nullable => 1,
+};
+
+column author => {
+    data_type => 'text',
+    is_nullable => 1,
+};
+
 primary_key (qw/issue_id repo/);
 
 belongs_to 'instant_answer', 'DDGC::DB::Result::InstantAnswer', 'instant_answer_id', {on_delete => 'cascade'};
 
 no Moose;
-__PACKAGE__->meta->make_immutable;
+__PACKAGE__->meta->make_immutable ( inline_constructor => 0 );
 

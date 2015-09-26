@@ -85,7 +85,7 @@ sub login :Chained('logged_out') :Args(0) {
 		$c->session->{username_field} = $c->d->uid;
 		my $user = $c->d->find_user($c->stash->{username});
 		if (($user && $user->rate_limit_login)
-		    || $c->session->{failed_logins} > $c->d->config->login_failure_session_limit) {
+		    || ($c->session->{failed_logins} && $c->session->{failed_logins} > $c->d->config->login_failure_session_limit) ) {
 			sleep 0.5; # Look like we tried
 			$c->stash->{login_failed} = 1;
 			return $c->detach;
@@ -97,13 +97,21 @@ sub login :Chained('logged_out') :Args(0) {
 				username => $username,
 				password => $password,
 			}, 'users')) {
-				$c->change_session_id;
+				$c->req->env->{'psgix.session.options'}{change_id} = 1;
 				my $data = $c->user->data;
 				delete $data->{token};
-				delete $data->{invalidate_existing_sessions};
+				$c->set_new_action_token;
+				if ( $data->{invalidate_existing_sessions} &&
+					time > $user->data->{invalidate_existing_sessions_timestamp} + (60 * 60 * 24) ) {
+					delete $data->{invalidate_existing_sessions};
+					delete $data->{invalidate_existing_sessions_timestamp};
+					delete $data->{post_invalidation_tokens};
+				}
+				elsif ( $data->{invalidate_existing_sessions} ) {
+					push @{ $data->{post_invalidation_tokens} }, $c->session->{action_token};
+				}
 				$c->user->data($data);
 				$c->user->update;
-				$c->set_new_action_token;
 				$last_url = $c->chained_uri('My','account') unless defined $last_url;
 				$c->response->redirect($last_url);
 				return $c->detach;
@@ -210,6 +218,30 @@ sub account :Chained('logged_in') :Args(0) {
 	})->all];
 }
 
+sub send_email_verification {
+	my ( $self, $c ) = @_;
+	return if ($c->user->email_verified || !$c->user->email);
+	my $data = $c->user->data || {};
+	return if ($data->{sent_email_verification_timestamp} &&
+		$data->{sent_email_verification_timestamp} > (time - (60 * 60)) );
+	if (!$data->{email_verify_token}) {
+		$data->{email_verify_token} = $self->ddgc->uid;
+	}
+	$c->stash->{email_verify_link} =
+		$c->chained_uri('My','email_verify',$c->user->lowercase_username,$data->{email_verify_token});
+	$c->d->postman->template_mail(
+		1,
+		$c->user->email,
+		'"DuckDuckGo Community" <noreply@duck.co>',
+		'[DuckDuckGo Community] Please verify your email address',
+		'newemail',
+		$c->stash,
+	);
+	$data->{sent_email_verification_timestamp} = time;
+	$c->user->data($data);
+	$c->user->update;
+}
+
 sub email :Chained('logged_in') :Args(0) {
 	my ( $self, $c, ) = @_;
 
@@ -225,21 +257,35 @@ sub email :Chained('logged_in') :Args(0) {
 		return;
 	}
 
-	my $email = $c->req->params->{emailaddress};
+	my $email = Email::Valid->address($c->req->params->{emailaddress});
 
-	if ( !$email || !Email::Valid->address($email) ) {
+	if ($c->req->params->{emailaddress} && !$email ) {
 		$c->stash->{no_valid_email} = 1;
 		return;
 	}
 
 	$c->user->data({}) if !$c->user->data;
 	my $data = $c->user->data();
-	$data->{email} = $email;
 	delete $data->{token};
+	$data->{email_verify_token} = $c->d->uid;
 	$c->user->data($data);
+	$c->user->email($email);
+	$c->user->email_verified(0);
 	$c->user->update;
 
+	$self->send_email_verification($c);
+
 	$c->response->redirect($c->chained_uri('My','account'));
+	return $c->detach;
+}
+
+sub resend_email_verification :Chained('logged_in') :Args(0) {
+	my ( $self, $c ) = @_;
+	$c->require_action_token;
+	$self->send_email_verification($c);
+
+	$c->stash->{x} = { ok => 1 };
+	$c->forward( $c->view('JSON') );
 	return $c->detach;
 }
 
@@ -309,6 +355,102 @@ sub public :Chained('logged_in') :Args(0) {
 
 }
 
+sub unsubscribe :Chained('base') :Args(2) {
+	my ( $self, $c, $username, $hash ) = @_;
+	my $from = $c->req->params->{from} || 1;
+
+	$c->stash->{title} = 'Unsubscribe';
+		$c->add_bc($c->stash->{title}, '');
+
+	my $user = $c->d->find_user($username);
+
+	if (!$user || !$hash) {
+		$c->stash->{invalid_hash} = 1;
+		return $c->detach;
+	}
+
+	my $response = $c->d->rs('User::CampaignNotice')->find({
+		users_id => $user->id,
+		campaign_id => 1,
+		campaign_source => 'campaign',
+	});
+
+	if (!$response || !$response->check_unsub_hash($hash)) {
+		$c->stash->{invalid_hash} = 1;
+		return $c->detach;
+	}
+
+	$response->update({ unsubbed => $from });
+	$c->stash->{success} = 1;
+}
+
+sub email_verify :Chained('base') :Args(2) {
+	my ( $self, $c, $username, $token ) = @_;
+
+	$c->stash->{title} = 'Email confirmation token check';
+		$c->add_bc($c->stash->{title}, '');
+
+	my $user = $c->d->find_user($username);
+
+	if (!$user || !$token) {
+		$c->stash->{invalid_token} = 1;
+		return $c->detach;
+	}
+
+	unless ($user->data && $user->data->{email_verify_token} &&
+		    ($token eq $user->data->{email_verify_token}) ) {
+		$c->stash->{invalid_token} = 1;
+		return $c->detach;
+	}
+
+	my $data = $user->data;
+	delete $data->{email_verify_token};
+	$user->data($data);
+	$user->email_verified(1);
+	$user->update;
+	$c->stash->{success} = 1;
+}
+
+sub wear_email_verify :Chained('base') :Args(2) {
+	my ( $self, $c, $username, $token ) = @_;
+
+	$c->stash->{title} = 'Share it & Wear it email confirmation token check';
+		$c->add_bc($c->stash->{title}, '');
+
+	my $user = $c->d->find_user($username);
+
+	if (!$user || !$token) {
+		$c->stash->{invalid_token} = 1;
+		return $c->detach;
+	}
+
+	my $response = $c->d->rs('User::CampaignNotice')->find({
+		campaign_id => $c->d->config->id_for_campaign('share'),
+		users_id    => $user->id,
+		responded   => { '!=' => undef },
+	});
+
+	if (!$response) {
+		$c->stash->{invalid_token} = 1;
+		return $c->detach;
+	}
+
+
+	unless ($user->data && $user->data->{wear_email_verify_token} &&
+		    ($token eq $user->data->{wear_email_verify_token}) ) {
+		$c->stash->{invalid_token} = 1;
+		return $c->detach;
+	}
+
+	my $data = $user->data;
+	delete $data->{wear_email_verify_token};
+	$user->data($data);
+	$user->update;
+	$response->campaign_email_verified(1);
+	$response->update;
+	$c->stash->{success} = 1;
+}
+
 sub forgotpw_tokencheck :Chained('logged_out') :Args(2) {
 	my ( $self, $c, $username, $token ) = @_;
 
@@ -351,7 +493,8 @@ sub forgotpw_tokencheck :Chained('logged_out') :Args(2) {
 	my $data = $user->data;
 	delete $data->{token};
 	$data->{invalidate_existing_sessions} = 1;
-	delete $data->{password_reset_session_token};
+	$data->{invalidate_existing_sessions_timestamp} = time;
+	delete $data->{post_invalidation_tokens};
 	$user->data($data);
 	$user->update;
 	$c->d->update_password($username,$newpass);
@@ -359,8 +502,9 @@ sub forgotpw_tokencheck :Chained('logged_out') :Args(2) {
 	$c->stash->{newpw_username} = $username;
 
 	$c->d->postman->template_mail(
-		$user->data->{email},
-		'"DuckDuckGo Community" <noreply@dukgo.com>',
+		$user->email_verified,
+		$user->email,
+		'"DuckDuckGo Community" <noreply@duck.co>',
 		'[DuckDuckGo Community] New password for '.$username,
 		'newpw',
 		$c->stash,
@@ -428,11 +572,12 @@ sub changepw :Chained('logged_in') :Args(0) {
 	$c->d->update_password($c->user->username,$newpass);
 	my $data = $c->user->data;
 
-	if ($data && $data->{email}) {
+	if ($c->user->email) {
 		$c->stash->{newpw_username} = $c->user->username;
 		$c->d->postman->template_mail(
-			$c->user->data->{email},
-			'"DuckDuckGo Community" <noreply@dukgo.com>',
+			$c->user->email_verified,
+			$c->user->email,
+			'"DuckDuckGo Community" <noreply@duck.co>',
 			'[DuckDuckGo Community] New password for '.$c->user->username,
 			'newpw',
 			$c->stash,
@@ -441,7 +586,8 @@ sub changepw :Chained('logged_in') :Args(0) {
 
 	delete $data->{token};
 	$data->{invalidate_existing_sessions} = 1;
-	$data->{password_reset_session_token} = $c->session->{action_token};
+	$data->{invalidate_existing_sessions_timestamp} = time;
+	delete $data->{post_invalidation_tokens};
 	$c->user->data($data);
 	$c->user->update;
 
@@ -491,7 +637,7 @@ sub forgotpw :Chained('logged_out') :Args(0) {
 	$c->session->{username_field} = $c->d->uid;
 	
 	my $user = $c->d->find_user($c->stash->{forgotpw_username});
-	if (!$user || !$user->data || !$user->data->{email}) {
+	if (!$user || !$user->email ) {
 		sleep .5;
 		$c->stash->{sentok} = 1;
 		return $c->detach;
@@ -516,8 +662,9 @@ sub forgotpw :Chained('logged_out') :Args(0) {
 	$c->stash->{forgotpw_link} = $c->chained_uri('My','forgotpw_tokencheck',$user->lowercase_username,$token);
 
 	$c->d->postman->template_mail(
-		$user->data->{email},
-		'"DuckDuckGo Community" <noreply@dukgo.com>',
+		$user->email_verified,
+		$user->email,
+		'"DuckDuckGo Community" <noreply@duck.co>',
 		'[DuckDuckGo Community] Reset password for '.$user->username,
 		'forgotpw',
 		$c->stash,
@@ -567,7 +714,8 @@ sub register :Chained('logged_out') :Args(0) {
 		$error = 1;
 	}
 
-	if ( $c->req->params->{email} && !Email::Valid->address($c->req->params->{email}) ) {
+	my $email = Email::Valid->address($c->req->params->{email});
+	if ( $c->req->params->{email} && !$email ) {
 		$c->stash->{not_valid_email} = 1;
 		$error = 1;
 	}
@@ -581,7 +729,6 @@ sub register :Chained('logged_out') :Args(0) {
 	
 	my $username = $c->stash->{username};
 	my $password = $c->req->params->{password};
-	my $email = $c->req->params->{email};
 	
 	my $find_user = $c->d->find_user($username);
 
@@ -597,13 +744,25 @@ sub register :Chained('logged_out') :Args(0) {
 		my $user = $c->d->create_user($username,$password);
 
 		if ($user) {
-			$c->authenticate({ username => $username, password => $password, }, 'users');
+			$user->check_password($password);
 			if ($email) {
 				$user->data({}) if !$user->data;
 				my $data = $user->data();
-				$data->{email} = $email;
+				$c->stash->{email_verify_token} = $data->{email_verify_token} = $c->d->uid;
+				$c->stash->{email_verify_link} =
+				    $c->chained_uri('My','email_verify',$user->lowercase_username, $c->stash->{email_verify_token});
 				$user->data($data);
+				$user->email($email);
+				$user->email_verified(0);
 				$user->update;
+				$c->d->postman->template_mail(
+					1,
+					$user->email,
+					'"DuckDuckGo Community" <noreply@duck.co>',
+					'[DuckDuckGo Community] ' . $user->username . ', thank you for registering. Please verify your email address',
+					'register',
+					$c->stash,
+				);
 			}
 			$c->session->{action_token} = undef;
 			$c->session->{captcha_string} = undef;
@@ -626,6 +785,7 @@ sub requestlanguage :Chained('logged_in') :Args(0) {
 		$c->add_bc($c->stash->{title}, '');
 	
 	if ($c->req->params->{submit}) {
+		$c->require_action_token;
 
 		my $error = 0;
 	
@@ -662,8 +822,9 @@ sub requestlanguage :Chained('logged_in') :Args(0) {
 
 			$c->stash->{c} = $c;
 			$c->d->postman->template_mail(
+				1,
 				$c->d->config->feedback_email,
-				'"DuckDuckGo Community" <noreply@dukgo.com>',
+				'"DuckDuckGo Community" <noreply@duck.co>',
 				'[DDG Language Request] New request',
 				'requestlanguage',
 				$c->stash,
@@ -673,64 +834,6 @@ sub requestlanguage :Chained('logged_in') :Args(0) {
 
 		}
 	}
-}
-
-# Temporary Uservoice claiming point
-sub uservoice_claim :Chained('logged_in') :Args(2) {
-	my ($self, $c, $claim_ref, $claim ) = @_;
-
-	if ($claim_ref =~ m/(\w)(\d+)/) {
-		my $type = $1;
-		my $id = $2;
-		my $obj;
-		if ($type eq 'i') {
-			$obj = $c->d->rs('Idea')->find($id);
-		} else {
-			$obj = $c->d->rs('Comment')->find($id);			
-		}
-		if ($obj) {
-			if ($obj->data->{uservoice_claim} eq $claim) {
-				my $email = $obj->data->{uservoice_email};
-				my @ideas = $c->d->rs('Idea')->search({
-				  data => { -like => '%uservoice_claim%' },
-				})->all;
-				my %claims;
-				for my $idea (@ideas) {
-					if (defined $idea->data->{uservoice_email} && $idea->data->{uservoice_email} eq $email) {
-						$idea->users_id($c->user->id);
-						delete $idea->data->{uservoice_email};
-						delete $idea->data->{uservoice_claim};
-						delete $idea->data->{uservoice_user};
-						delete $idea->data->{import};
-						delete $idea->data->{import_user};
-						$idea->data($idea->data);
-						$idea->update;
-						my $url = $c->chained_uri(@{$idea->u});
-						$claims{$url} = $idea unless defined $claims{$url};
-					}
-				}
-				my @comments = $c->d->rs('Comment')->search({
-				  data => { -like => '%uservoice_claim%' },
-				})->all;
-				for my $comment (@comments) {
-					if (defined $comment->data->{uservoice_email} && $comment->data->{uservoice_email} eq $email) {
-						$comment->users_id($c->user->id);
-						delete $comment->data->{uservoice_email};
-						delete $comment->data->{uservoice_claim};
-						delete $comment->data->{uservoice_user};
-						delete $comment->data->{import};
-						delete $comment->data->{import_user};
-						$comment->data($comment->data);
-						$comment->update;
-						my $url = $c->chained_uri(@{$comment->u});
-						$claims{$url} = $comment unless defined $claims{$url};
-					}
-				}
-				$c->stash->{claims} = [values %claims];
-			}
-		}
-	}
-
 }
 
 no Moose;

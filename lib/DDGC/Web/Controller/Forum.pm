@@ -51,12 +51,12 @@ sub userbase : Chained('base') PathPart('') CaptureArgs(0) {
 
 sub get_sticky_threads {
   my ( $self, $c ) = @_;
-  $c->stash->{sticky_threads} = $c->d->rs('Thread')->search_rs({
+  $c->stash->{sticky_threads} = [ $c->d->rs('Thread')->search_rs({
     sticky => 1,
     forum  => $c->stash->{forum_index} // 1,
   },{
     cache_for => 3600,
-  });
+  })->all ];
 }
 
 sub set_grouped_comments {
@@ -85,9 +85,9 @@ sub general : Chained('userbase') Args(0) {
   $self->get_sticky_threads($c);
 }
 
-sub admins : Chained('userbase') Args(0) {
+sub internal : Chained('userbase') Args(0) {
   my ( $self, $c ) = @_;
-  $c->stash->{forum_index} = $c->d->config->id_for_forum('admin');
+  $c->stash->{forum_index} = $c->d->config->id_for_forum('internal');
   $c->add_bc($c->d->config->forums->{$c->stash->{forum_index}}->{name});
   if (!$c->d->forum->allow_user($c->stash->{forum_index}, $c->user)) {
     $c->response->redirect($c->chained_uri('Forum','general',{ thread_notallowed => 1 }));

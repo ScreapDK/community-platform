@@ -4,6 +4,7 @@ package DDGC::DB::Result::User;
 use Moose;
 use MooseX::NonMoose;
 extends 'DDGC::DB::Base::Result';
+with 'DDGC::Schema::Role::Result::User::Subscription';
 use DBIx::Class::Candy;
 use DDGC::User::Page;
 use Path::Class;
@@ -19,6 +20,18 @@ use DateTime;
 use DateTime::Duration;
 
 table 'users';
+
+# Override subscription_types from Role::Result::User::Subscription
+#  - our reference to config is elsewhere
+has '+subscription_types' => (
+    is => 'ro',
+    lazy => 1,
+    builder => '_build_subscriptions',
+);
+sub _build_subscriptions {
+    $_[0]->ddgc->config->subscriptions;
+}
+
 
 sub u_userpage {
 	my ( $self ) = @_;
@@ -51,12 +64,6 @@ column email_notification_content => {
 	default_value => 1,
 };
 
-column admin => {
-	data_type => 'int',
-	is_nullable => 0,
-	default_value => 0,
-};
-
 column ghosted => {
 	data_type => 'int',
 	is_nullable => 0,
@@ -72,6 +79,12 @@ column ignore => {
 column email => {
 	data_type => 'text',
 	is_nullable => 1,
+};
+
+column email_verified => {
+	data_type => 'int',
+	is_nullable => 0,
+	default_value => 0,
 };
 
 column userpage => {
@@ -105,19 +118,6 @@ column updated => {
 	data_type => 'timestamp with time zone',
 	set_on_create => 1,
 	set_on_update => 1,
-};
-
-column roles => {
-	data_type => 'text',
-	is_nullable => 1,
-	default_value => '',
-};
-
-column flags => {
-	data_type => 'text',
-	is_nullable => 0,
-	serializer_class => 'JSON',
-	default_value => '[]',
 };
 
 has xmpp => (
@@ -173,6 +173,7 @@ has_many 'events', 'DDGC::DB::Result::Event', 'users_id', {
 has_many 'medias', 'DDGC::DB::Result::Media', 'users_id', {
   cascade_delete => 0,
 };
+has_many 'claimed_ideas', 'DDGC::DB::Result::Idea', 'claimed_by';
 
 has_many 'user_languages', 'DDGC::DB::Result::User::Language', { 'foreign.username' => 'self.username' }, {
   cascade_delete => 1,
@@ -194,6 +195,10 @@ has_many 'github_users', 'DDGC::DB::Result::GitHub::User', 'users_id', {
 };
 
 has_many 'failedlogins', 'DDGC::DB::Result::User::FailedLogin', 'users_id';
+
+has_many 'roles', 'DDGC::DB::Result::User::Role', 'users_id';
+
+has_many 'subscriptions', 'DDGC::DB::Result::User::Subscription', 'users_id';
 
 has_many 'instant_answer_users', 'DDGC::DB::Result::InstantAnswer::Users', 'users_id';
 many_to_many 'instant_answers', 'instant_answer_users', 'instant_answer';
@@ -217,10 +222,16 @@ sub add_default_notifications {
 	$self->add_type_notification(qw( idea_votes 3 1 ));
 }
 
+sub unsubscribe_all_notifications {
+	my ( $self ) = @_;
+	$self->user_notifications->delete;
+}
+
 # WORKAROUND
 sub db { return shift; }
 
 sub translation_manager { shift->is('translation_manager') }
+sub admin { shift->is('admin') }
 
 sub github_user {
 	my ( $self ) = @_;
@@ -229,34 +240,37 @@ sub github_user {
 	})->first;
 }
 
+sub normalise_role {
+	my ( $role ) = @_;
+	return 'forum_manager' if ( lc( $role ) eq 'idea_manager' );
+	return 'forum_manager' if ( lc( $role ) eq 'community_leader' );
+	return $role;
+}
+
 sub is {
-	my ( $self, $flag ) = @_;
-	return 1 if $self->admin;
-	return $self->has_flag($flag);
+	my ( $self, $role ) = @_;
+	return 0 if !$role;
+	$role = normalise_role( $role );
+	return 1 if ( $role eq 'user' );
+	return 1 if $self->roles->find({ role => $self->ddgc->config->id_for_role('admin') });
+	return $self->roles->find({ role => $self->ddgc->config->id_for_role( $role ) });
 }
 
-sub has_flag {
-	my ( $self, $flag ) = @_;
-	return 0 unless $flag;
-	return 1 if grep { $_ eq $flag } @{$self->flags};
-	return 0;
+sub add_role {
+	my ( $self, $role ) = @_;
+	$role = normalise_role( $role );
+	my $role_id = $self->ddgc->config->id_for_role($role);
+	return 0 if !$role_id;
+	$self->roles->find_or_create({ role => $role_id });
 }
 
-sub add_flag {
-	my ( $self, $flag ) = @_;
-	return 0 if grep { $_ eq $flag } @{$self->flags};
-	push @{$self->flags}, $flag;
-	$self->make_column_dirty("flags");
-	return 1;
-}
-
-sub del_flag {
-	my ( $self, $flag ) = @_;
-	return 0 unless grep { $_ eq $flag } @{$self->flags};
-	my @newflags = grep { $_ ne $flag } @{$self->flags};
-	$self->flags(\@newflags);
-	$self->make_column_dirty("flags");
-	return 1;
+sub del_role {
+	my ( $self, $role ) = @_;
+	$role = normalise_role( $role );
+	my $role_id = $self->ddgc->config->id_for_role($role);
+	return 0 if !$role_id;
+	my $has_role = $self->roles->find({ role => $role_id });
+	$has_role->delete if $has_role;
 }
 
 has _locale_user_languages => (
@@ -445,39 +459,6 @@ sub profile_picture {
 	} else {
 		return \%return;
 	}
-}
-
-sub gravatar_to_avatar {
-	my ($self) = @_;
-	return unless $self->public;
-	my $gravatar_email;
-	return if (-f $self->avatar_filename );
-
-	if ($self->data && defined $self->data->{gravatar_email}) {
-		$gravatar_email = $self->data->{gravatar_email};
-	}
-
-	if ($self->data && defined $self->data->{userpage} && defined $self->data->{userpage}->{gravatar_email}) {
-		$gravatar_email = $self->data->{userpage}->{gravatar_email};
-	}
-
-	if ($self->userpage && defined $self->userpage->{gravatar_email}) {
-		$gravatar_email = $self->userpage->{gravatar_email};
-	}
-
-	return unless $gravatar_email;
-	my $md5 = md5_hex($gravatar_email);
-
-	my ($fh, $filename) = tempfile();
-	my $url = "http://www.gravatar.com/avatar/$md5?r=g&s=200";
-
-	unless (is_success(getstore($url, $filename))) {
-		carp("Unable to retrieve $url for " . $self->username);
-		return 0;
-	}
-
-	return unless $self->store_avatar($filename);
-	$self->generate_thumbs;
 }
 
 sub generate_thumbs {
@@ -916,4 +897,4 @@ sub get {
 ### END
 
 no Moose;
-__PACKAGE__->meta->make_immutable;
+__PACKAGE__->meta->make_immutable ( inline_constructor => 0 );

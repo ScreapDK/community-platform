@@ -1,54 +1,41 @@
-<div class="left small-description hide">
-  <h2>{{name}}</h2>
-  {{#each topic}}
-    <span class="btn--wire topic ia-single--topic">{{this}}</span>
-  {{/each}}
-  {{#if description}}
-    <p>{{description}}</p>
-  {{/if}}
-</div>
-<a href="/edit" class="hide ia-single--edit btn--primary topic right ia-single--topic">Edit Page</a>
-<div class="ia-single--screenshots clearfix">
-  <div class="window-buttons-container">
-    <span class="circle"></span>
-    <span class="circle"></span>
-    <span class="circle"></span>
-  </div>
-  <div class="ia-single--screenshots-top"></div>
-  <div class="ia-single--red-bar"></div>
-  <div class="ia-single--image-container">
-    <img src="https://images.duckduckgo.com/iu/?u={{encodeURIComponent 'https://ia-screenshots.s3.amazonaws.com/'}}{{id}}_index.png&f=1">
-    <div class="ia-single--serp">
-      <div class="ia-single--serp-item">
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-      </div>
-
-      <div class="ia-single--serp-item">
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-        <div class="serp-item"></div>
-      </div>
-
+{{#with live}}
+{{#ne_and dev_milestone 'planning' 'development'}}
+{{#if example_query}}
+<div class="screens--wide">
+  <div class="ia-single--screenshots">
+    <div class="screenshot--status hide">
+        <div class="default-message hide"></div>
+        <div class="revert hide"><a href="#">Restore previous screenshot</a></div>
+        <img class="loader" style="display: none;" src="/static/img/ia/loader_f2f2f2.gif">
     </div>
+
+    <!-- Mobile image -->
+    <div class="mobile-faux__container hide">
+        <div class="mobile-faux__edge">
+            <div class="mobile-faux__padding">
+                <img class="screenshot-mobile" src="" style="display: inline-block;">
+            </div>
+        </div>
+    </div>
+
+    <!-- Desktop image -->
+    <img class="screenshot-desktop hide" src="" style="display: block;">
   </div>
-</div>
 
-<!--
-<div class="screens">
-    {{#if example_query}}
-        <div class="img_container open"><strong>Desktop</strong> <div class="button arrow"><span>&#x25B4;</span></div> </br>
-            <img class="desktop" src="https://images.duckduckgo.com/iu/?u={{encodeURIComponent 'https://ia-screenshots.s3.amazonaws.com/'}}{{id}}_desktop.png&f=1">
-        </div>
-
-        <div class="img_container"><strong>Mobile</strong> <div class="button arrow"><span>&#x25BE;</span></div> </br>
-            <img class="mobile hide" src="https://images.duckduckgo.com/iu/?u={{encodeURIComponent 'https://ia-screenshots.s3.amazonaws.com/'}}{{id}}_mobile.png&f=1">
-        </div>
+  {{#ne_and dev_milestone 'live' 'deprecated'}}
+    {{#if ../../can_show}}
+        <span class="generate-screenshot pull-right btn btn--primary">
+          <i class="icon-refresh"></i>
+        </span>
     {{/if}}
+  {{else}}
+      {{#if ../../../../permissions.can_edit}}
+        <span class="generate-screenshot pull-right btn btn--primary">
+          <i class="icon-refresh"></i>
+        </span>
+      {{/if}}
+  {{/ne_and}}
 </div>
--->
+{{/if}}
+{{/ne_and}}
+{{/with}}

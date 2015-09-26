@@ -10,7 +10,13 @@ BEGIN {extends 'Catalyst::Controller'; }
 
 sub base :Chained('/base') :PathPart('admin') :CaptureArgs(0) {
     my ( $self, $c ) = @_;
-	if (!$c->user || !$c->user->admin) {
+	if (!$c->user) {
+		$c->response->redirect($c->chained_uri('My','login',{ admin_required => 1 }));
+		return $c->detach;
+	}
+
+
+	if (!$c->user->admin) {
 		$c->response->redirect($c->chained_uri('Root','index',{ admin_required => 1 }));
 		return $c->detach;
 	}
@@ -21,11 +27,11 @@ sub base :Chained('/base') :PathPart('admin') :CaptureArgs(0) {
 sub index :Chained('base') :PathPart('') :Args(0) {
     my ( $self, $c ) = @_;
 	$c->bc_index;
-	$c->stash->{latest_updated_users} = $c->d->rs('User')->search({},{
+	$c->stash->{latest_updated_users} = [ $c->d->rs('User')->search({},{
 		order_by => { -desc => 'me.updated' },
 		rows => 5,
 		page => 1,
-	});
+	})->all ];
 	$c->stash->{day_registrations_count} = $c->d->rs('User')->search({
 		created => { ">" => $c->d->db->storage->datetime_parser->format_datetime(
 			DateTime->now - DateTime::Duration->new( days => 1 )
@@ -37,6 +43,7 @@ sub index :Chained('base') :PathPart('') :Args(0) {
 	$c->stash->{votes_count} = $c->d->rs('Token::Language::Translation::Vote')->count;
 	$c->stash->{token_domains_count} = $c->d->rs('Token::Domain')->count;
 	$c->stash->{tokens_count} = $c->d->rs('Token')->count;
+	$c->stash->{remaining_coupon_count} = $c->d->rs('User::Coupon')->search({ users_id => undef })->count;
 }
 
 no Moose;

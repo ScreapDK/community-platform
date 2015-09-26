@@ -9,11 +9,11 @@ BEGIN {extends 'Catalyst::Controller'; }
 sub base :Chained('/base') :PathPart('help') :CaptureArgs(0) {
   my ( $self, $c ) = @_;
   $c->stash->{page_class} = "page-help  texture-ducksymbol";
-  $c->stash->{help_categories} = $c->d->rs('Help::Category')->search({},{
+  $c->stash->{help_categories} = [ $c->d->rs('Help::Category')->search({},{
     order_by => { -asc => 'me.sort' },
     prefetch => [ 'help_category_contents', { helps => 'help_contents' } ],
     cache_for => 600,
-  });
+  })->all ];
   $c->stash->{title} = 'Help pages';
   $c->stash->{help_language} = $c->d->rs('Language')->search({ locale => 'en_US' })->first;
   $c->stash->{help_language_id} = $c->stash->{help_language}->id;
@@ -21,32 +21,13 @@ sub base :Chained('/base') :PathPart('help') :CaptureArgs(0) {
 
 sub legacy_redirect :Chained('base') :PathPart('en_US') :Args {
   my ( $self, $c, @args ) = @_;
-  $c->response->redirect('https://duck.co/help/'.join('/',@args));
+  $c->response->redirect('/help/'.join('/',@args));
 }
 
-# sub language :Chained('base') :PathPart('') :CaptureArgs(1) {
-#   my ( $self, $c, $locale ) = @_;
-#   my $oldurl_help = $c->d->rs('Help')->search({
-#     old_url => { -like => 'http://help.dukgo.com/customer/portal/articles/'.$locale.'%' }
-#   },{
-#     cache_for => 86400,
-#   })->first;
-#   if ($oldurl_help) {
-#     $c->response->redirect($c->chained_uri('Help','help','en_US',$oldurl_help->help_category->key,$oldurl_help->key));
-#     return $c->detach;
-#   }
-#   unless ($locale eq 'en_US') {
-#     $c->response->redirect($c->chained_uri('Root','index',{ help_language_notfound => 1 }));
-#     return $c->detach;
-#   }
-#   $c->stash->{help_language} = $c->d->rs('Language')->search({ locale => $locale })->first;
-#   if (!$c->stash->{help_language}) {
-#     $c->response->redirect($c->chained_uri('Root','index',{ help_language_notfound => 1 }));
-#     return $c->detach;
-#   }
-#   $c->add_bc('Help articles', $c->chained_uri('Help','index',$locale));
-#   $c->stash->{help_language_id} = $c->stash->{help_language}->id;
-# }
+sub old_url_redirect :Chained('base') :PathPart('customer/portal/articles/') :Args {
+  my ( $self, $c, $article ) = @_;
+  $c->response->redirect("/help/$article");
+}
 
 sub index :Chained('base') :PathPart('') :Args(0) {
   my ( $self, $c ) = @_;
@@ -67,7 +48,7 @@ sub search :Chained('base') :Args(0) {
   );
 
   $c->stash->{articles} = $articles;
-  $c->stash->{search_helps} = $articles_rs;
+  $c->stash->{search_helps} = [ $articles_rs->all ] if $articles_rs;
   $c->stash->{title} = 'Search help pages';
 }
 
@@ -92,6 +73,7 @@ sub category_base :Chained('base') :PathPart('') :CaptureArgs(1) {
     return $c->detach;
   }
   $c->stash->{help_category_content} = $c->stash->{help_category}->content_by_language_id_cached($c->stash->{help_language_id});
+  $c->stash->{help_category_helps} = [ $c->stash->{help_category}->helps->all ];
   $c->add_bc($c->stash->{help_category_content}->title, $c->chained_uri('Help','category',$c->stash->{help_category}->key));
   $c->stash->{title} = $c->stash->{help_category_content}->title;
 }
@@ -113,6 +95,7 @@ sub help_base :Chained('category_base') :PathPart('') :CaptureArgs(1) {
 		$c->response->redirect($c->chained_uri('Help','index',{ help_notfound => 1 }));
 		return $c->detach;
 	}
+  $c->stash->{help_related_helps} = [ $c->stash->{help}->related_helps->all ];
   $c->stash->{help_content} = $c->stash->{help}->search_related('help_contents',{
     language_id => $c->stash->{help_language}->id
   },{

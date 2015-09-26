@@ -1,0 +1,181 @@
+<div>
+<div class="dev_pipeline-column left" id="pipeline-planning">
+    <h2 class="dev_pipeline-column__title">
+        Planning
+    </h2>
+
+    <ul class="dev_pipeline-column__list" id="pipeline-planning__list">
+        {{#each planning}}
+            <li id="pipeline-planning__list__{{id}}" class="{{#if can_edit}}can_edit{{/if}} producer-{{producer}} designer-{{designer}} {{#each developer}}developer-{{name}} {{/each}}">
+                <div class="ia-item--stamp circle stamp--{{repo}} left"></div>
+                <div class="left item-name">
+                    <a href="/ia/view/{{id}}">{{name}}</a>
+                </div>
+                <div class="right item-activity">
+                    {{#if pr}}
+                        <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}" class="one-line" id="pr">
+                            PR 
+                        </a>
+                        
+                    {{/if}}
+                    <span title="{{format_time last_update}}">
+                        {{timeago last_update}}
+                    </span>
+                </div>
+                <span class="clearfix"></span>
+                <div class="activity-details hide">
+                    {{#is_before last_comment.date last_commit.date}}
+                        <div class="new-commit one-line">
+                            <i class="icon icon-circle" />
+                            New commit: <a href="{{last_commit.diff}}">{{last_commit.message}}</a>
+                        </div>
+                    {{/is_before}}
+                    {{#if last_comment}}
+                        <div class="last-comment one-line">
+                            <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}#issuecomment-{{last_comment.id}}">
+                                <i class="icon icon-bubbles" />
+                                Last comment by {{last_comment.user}}
+                            </a>
+                       </div>
+                    {{/if}}
+                </div>
+            </li>
+        {{/each}}
+    </ul>
+</div>
+
+<div class="dev_pipeline-column left" id="pipeline-development">
+    <h2 class="dev_pipeline-column__title">
+        Development
+    </h2>
+
+    <ul class="dev_pipeline-column__list" id="pipeline-development__list">
+        {{#each development}}
+            <li id="pipeline-development__list__{{id}}" class="{{#if can_edit}}can_edit{{/if}} producer-{{producer}} designer-{{designer}} {{#each developer}}developer-{{name}} {{/each}}">
+                <div class="ia-item--stamp circle stamp--{{repo}} left"></div>
+                <div class="left item-name">
+                    <a href="/ia/view/{{id}}">{{name}}</a>
+                </div>
+                <div class="right item-activity">
+                    {{#if pr}}
+                        <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}" class="one-line" id="pr">
+                            PR
+                        </a>
+                        
+                    {{/if}}
+                    <span title="{{format_time last_update}}">
+                        {{timeago last_update}}
+                    </span>
+                </div>
+                <span class="clearfix"></span>
+                <div class="activity-details hide">
+                    {{#is_before last_comment.date last_commit.date}}
+                        <div class="new-commit one-line">
+                            <i class="icon icon-circle" />
+                            New commit: <a href="{{last_commit.diff}}">{{last_commit.message}}</a>
+                        </div>
+                    {{/is_before}}
+                    {{#if last_comment}}
+                        <div class="last-comment one-line">
+                            <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}#issuecomment-{{last_comment.id}}">
+                                <i class="icon icon-bubbles" />
+                                Last comment by {{last_comment.user}}
+                            </a>
+                       </div>
+                    {{/if}}
+                </div>
+            </li>
+        {{/each}}
+    </ul>
+</div>
+
+<div class="dev_pipeline-column left" id="pipeline-testing">
+    <h2 class="dev_pipeline-column__title">
+        Testing
+    </h2>
+
+    <ul class="dev_pipeline-column__list" id="pipeline-testing__list">
+        {{#each testing}}
+            <li id="pipeline-testing__list__{{id}}" class="{{#if can_edit}}can_edit{{/if}} producer-{{producer}} designer-{{designer}} {{#each developer}}developer-{{name}} {{/each}}">
+                <div class="ia-item--stamp circle stamp--{{repo}} left"></div>
+                <div class="left item-name">
+                    <a href="/ia/view/{{id}}">{{name}}</a>
+                </div>
+                <div class="right item-activity">
+                    {{#if pr}}
+                        <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}" class="one-line" id="pr">
+                            PR
+                        </a>
+                        
+                    {{/if}}
+                    <span title="{{format_time last_update}}">
+                        {{timeago last_update}}
+                    </span>
+                </div>
+                <span class="clearfix"></span>
+                <div class="activity-details hide">
+                    {{#is_before last_comment.date last_commit.date}}
+                        <div class="new-commit one-line">
+                            <i class="icon icon-circle" />
+                            New commit: <a href="{{last_commit.diff}}">{{last_commit.message}}</a>
+                        </div>
+                    {{/is_before}}
+                    {{#if last_comment}}
+                        <div class="last-comment one-line">
+                            <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}#issuecomment-{{last_comment.id}}">
+                                <i class="icon icon-bubbles" />
+                                Last comment by {{last_comment.user}}
+                            </a>
+                       </div>
+                    {{/if}}
+                </div>
+            </li>
+        {{/each}}
+    </ul>
+</div>
+
+<div class="dev_pipeline-column left" id="pipeline-complete">
+    <h2 class="dev_pipeline-column__title">
+        Complete
+    </h2>
+
+    <ul class="dev_pipeline-column__list" id="pipeline-complete__list">
+        {{#each complete}}
+            <li id="pipeline-complete__list__{{id}}" class="{{#if can_edit}}can_edit{{/if}} producer-{{producer}} designer-{{designer}} {{#each developer}}developer-{{name}} {{/each}}">
+                <div class="ia-item--stamp circle stamp--{{repo}} left"></div>
+                <div class="left item-name">
+                    <a href="/ia/view/{{id}}">{{name}}</a>
+                </div>
+                <div class="right item-activity">
+                    {{#if pr}}
+                        <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}" class="one-line" id="pr">
+                            PR
+                        </a>
+                        
+                    {{/if}}
+                    <span title="{{format_time last_update}}">
+                        {{timeago last_update}}
+                    </span>
+                </div>
+                <span class="clearfix"></span>
+                <div class="activity-details hide">
+                    {{#is_before last_comment.date last_commit.date}}
+                        <div class="new-commit one-line">
+                            <i class="icon icon-circle" />
+                            New commit: <a href="{{last_commit.diff}}">{{last_commit.message}}</a>
+                        </div>
+                    {{/is_before}}
+                    {{#if last_comment}}
+                        <div class="last-comment one-line">
+                            <a href="https://github.com/duckduckgo/zeroclickinfo-{{repo}}/issues/{{pr.issue_id}}#issuecomment-{{last_comment.id}}">
+                                <i class="icon icon-bubbles" />
+                                Last comment by {{last_comment.user}}
+                            </a>
+                       </div>
+                    {{/if}}
+                </div>
+            </li>
+        {{/each}}
+    </ul>
+</div>
+</div>

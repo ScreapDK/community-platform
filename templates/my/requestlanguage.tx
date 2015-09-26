@@ -3,6 +3,7 @@
 <: } :>
 
 <form action="<: $u('My','requestlanguage') :>" method="post" id="formRequestLanguage" class="content-box column-form">
+	<input type="hidden" name="action_token" value="<: $action_token :>">
     <div class="head">		
 		<h2><: $l('Request a new language') :></h2>
 	</div>	
@@ -15,7 +16,7 @@
 			<label for="email" class="form_input-label" aria-describedby="errorInvalidEmail"><: $l('Your email') :></label>
 		  </div>
 		  <div class="twothird">
-			<input type="email" name="email" id="email" value="<: $c.user.data.email || $requestlanguage_email :>" class="text">
+			<input type="email" name="email" id="email" value="<: $c.user.email || $requestlanguage_email :>" class="text">
 		  </div>
 		</div>		
 		<div class="row">

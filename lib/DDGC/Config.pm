@@ -5,16 +5,27 @@ use Moose;
 use File::Path qw( make_path );
 use File::Spec;
 use File::ShareDir::ProjectDistDir;
-use DDGC::Static;
 use Path::Class;
 use Catalyst::Utils;
 use FindBin;
+use IO::All;
+use JSON;
+
+use DDGC::Config::Subscriptions;
 
 has always_use_default => (
 	is => 'ro',
 	lazy => 1,
 	default => sub { 0 },
 );
+
+has subscriptions => (
+	is => 'ro',
+	lazy_build => 1,
+);
+sub _build_subscriptions {
+	DDGC::Config::Subscriptions->new;
+}
 
 sub has_conf {
 	my ( $name, $env_key, $default ) = @_;
@@ -52,7 +63,6 @@ has_conf pid => DDGC_PID => $$;
 
 has_conf appdir_path => DDGC_APPDIR => "$FindBin::Bin/../";
 has_conf rootdir_path => DDGC_ROOTDIR => $ENV{HOME}.'/ddgc/';
-has_conf ddgc_static_path => DDGC_STATIC => DDGC::Static->sharedir;
 has_conf no_cache => DDGC_NOCACHE => 0;
 
 sub rootdir {
@@ -112,11 +122,12 @@ has_conf smtp_ssl => DDGC_SMTP_SSL => 0;
 has_conf smtp_sasl_username => DDGC_SMTP_SASL_USERNAME => undef;
 has_conf smtp_sasl_password => DDGC_SMTP_SASL_PASSWORD => undef;
 
+has_conf shared_secret => DDGC_SHARED_SECRET => undef;
+
 has_conf templatedir => DDGC_TEMPLATEDIR => sub { dir( Catalyst::Utils::home('DDGC'), 'templates' )->resolve->absolute->stringify };
 
 has_conf duckpan_url => DDGC_DUCKPAN_URL => 'http://duckpan.org/';
 has_conf duckpan_locale_uploader => DDGC_DUCKPAN_LOCALE_UPLOADER => 'testone';
-has_conf roboduck_aiml_botid => ROBODUCK_AIML_BOTID => 'ab83497d9e345b6b';
 has_conf duckduckhack_url => DDGC_DUCKDUCKHACK_URL => 'http://duckduckhack.com/';
 has_conf github_token => DDGC_GITHUB_TOKEN => undef;
 has_conf github_org => DDGC_GITHUB_ORG => 'duckduckgo';
@@ -133,6 +144,8 @@ has_conf login_failure_session_limit => DDGC_LOGIN_FAILURE_SESSION_LIMIT => 10;
 
 has_conf forgotpw_session_limit => DDGC_LOGIN_FAILURE_SESSION_LIMIT => 5;
 has_conf forgotpw_user_time_limit => DDGC_LOGIN_FAILURE_SESSION_LIMIT => 300;
+
+has_conf unsub_key => DDGC_UNSUB_KEY => undef;
 
 # DANGER: DEACTIVATES PASSWORD CHECK FOR ALL USERACCOUNTS!!!!!!!!!!!!!!!!!!!!!!
 sub prosody_running { defined $ENV{'DDGC_PROSODY_RUNNING'} ? $ENV{'DDGC_PROSODY_RUNNING'} : 0 }
@@ -266,11 +279,11 @@ sub forums {
 			user_filter => sub { ($_[0] && $_[0]->is('translation_manager')) },
 		},
 		'4' => {
-			name => 'Admins',
-			notification => 'Admins Post',
+			name => 'Internal',
+			notification => 'Internal Forum Post',
 			button_img => '/static/images/admin_button.png',
-			url  => 'admins',
-			user_filter => sub { ($_[0] && $_[0]->is('admin')) },
+			url  => 'internal',
+			user_filter => sub { ($_[0] && $_[0]->is('patron')) },
 		},
 		'5' => {
 			name => 'Special Announcements',
@@ -287,6 +300,34 @@ sub id_for_forum {
 	return (grep { $forums->{$_}->{name} =~ m/$forum_name/i } keys $forums)[0];
 }
 
+sub roles {
+	my ( $self ) = @_;
+	+{
+		'1' => {
+			role => 'admin',
+			name => 'Community Platform Admin',
+		},
+		'2' => {
+			role => 'forum_manager',
+			name => 'Community Leader (Forum Manager)',
+		},
+		'3' => {
+			role => 'translation_manager',
+			name => 'Translation Manager',
+		},
+		'4' => {
+			role => 'patron',
+			name => 'Patron',
+		},
+	};
+}
+sub id_for_role {
+	my ( $self, $role_name ) = @_;
+	my $roles = $self->roles;
+	$role_name = 'forum_manager' if ($role_name eq 'community_leader');
+	(grep { $roles->{$_}->{role} eq $role_name } keys $roles)[0] // 0;
+}
+
 sub campaign_config { $_[0]->campaigns->{$_[0]->campaign} }
 sub campaigns {
 	my ( $self ) = @_;
@@ -295,19 +336,22 @@ sub campaigns {
 			id => 1,
 			active => 1,
 			notification_active => 0,
+			min_length => 20,
 			url => '/wear/',
 			notification => "Help share DuckDuckGo! Find out more...",
 			question1 => "How did you hear about DuckDuckGo?",
 			question2 => "How long have you been a DuckDuckGo user?",
 			question3 => "Is this your first time spreading DuckDuckGo to others?",
+			question4 => "Share your email so that we can send updates on your DuckDuckGo T-shirt.",
 		},
 		share_followup => {
 			id => 2,
 			active => 1,
 			notification_active => 1,
+			min_length => 50,
 			url => '/wear/',
 			notification => "You've been sharing DuckDuckGo for 30 days. Ready to answer your final questions?",
-			question1 => "How did you get your friend to switch to DuckDuckGo?",
+			question1 => "How did you get your friends to switch to DuckDuckGo?",
 			question2 => "What did they most like about DuckDuckGo?",
 			question3 => "How long did it take them to switch?",
 		}
@@ -317,10 +361,45 @@ sub id_for_campaign {
 	my ($self, $campaign) = @_;
 	return $self->campaigns->{$campaign}->{id};
 }
+sub first_active_campaign {
+	my ($self) = @_;
+	my $c = $self->campaigns;
+	(sort { $c->{$a}->{id} <=> $c->{$b}->{id} } grep { $c->{$_}->{active} } keys $c)[0];
+}
 
 has_conf feedback_email => DDGC_FEEDBACK_EMAIL => 'support@duckduckgo.com';
 has_conf error_email => DDGC_ERROR_EMAIL => 'ddgc@duckduckgo.com';
 has_conf share_email => DDGC_SHARE_EMAIL => 'sharewear@duckduckgo.com';
+has_conf ia_email => DDGC_IA_EMAIL => 'ddgc-ia@duckduckgo.com';
+
+has js_version => (
+	isa => 'Str',
+	is => 'ro',
+	lazy_build => 1,
+);
+sub _build_js_version {
+	my ( $self ) = @_;
+	my $ROOT_PATH = $self->appdir_path;
+
+	# look for ia.js which doesn't exist in the repo.
+	# If it exists then we are building a debug version.
+	# If it doesn't then continue on to return the version
+	# number for release.
+	if( -f "$ROOT_PATH/root/static/js/ia.js"){
+		return '';
+	}
+
+	my $file = "$ROOT_PATH/package.json";
+	my $pkg < io($file);
+	my $json = decode_json($pkg);
+
+	if($json->{'version'} =~ /(\d+)\.(\d+)\.(\d+)/){
+		my $version = $2 - 1;
+		return qq($1.$version.$3);
+	} else {
+		$self->errorlog("Unable to ascertain JS version from $ROOT_PATH/package.json");
+		return '';
+	}
+}
 
 1;
-

@@ -46,6 +46,7 @@ sub index :Chained('base') :PathPart('') :Args(0) {
 			if ($id > 0) {
 				$help = $c->d->rs('Help')->find($id);
 				die "help id ".$_." not found" unless $help;
+				$help_values{help_category_id} ||= undef;
 				for (keys %help_values) {
 					$help->$_($help_values{$_});
 				}
@@ -89,10 +90,10 @@ sub index :Chained('base') :PathPart('') :Args(0) {
 		order_by => { -asc => 'me.key' },
 	})->all];
 
-	$c->stash->{helps} = $c->d->rs('Help')->search({},{
+	$c->stash->{helps} = [ $c->d->rs('Help')->search({},{
 		order_by => [ { -asc => 'help_category.sort' }, { -asc => 'me.sort' } ],
 		prefetch => [ 'help_contents', { help_category => [ 'help_category_contents','helps' ] } ],
-	});
+	})->all ];
 
 }
 
@@ -151,9 +152,9 @@ sub categories :Chained('base') :Args(0) {
 		}
 	}
 
-	$c->stash->{categories} = $c->d->rs('Help::Category')->search({},{
+	$c->stash->{categories} = [ $c->d->rs('Help::Category')->search({},{
 		order_by => { -asc => 'me.sort' },
-	});
+	})->all ];
 
 }
 

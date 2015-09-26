@@ -1,0 +1,14 @@
+/*
+	Buttons
+	(Most of the basics are handled by litestrap - this is for custom stuff)
+*/
+
+	.btn--wire--hero {
+		&.is-disabled {
+			opacity: 0.5;
+			background-color: transparent;
+			color: $white;
+			cursor: default;
+		}
+	}
+

@@ -7,28 +7,28 @@
 	</form>
 </div>  
 
-<: if $token_results.count { :>
+<: if $token_results { :>
   <div class="content-box translate-overview content-box-toggleclick content-box-click">
     <div class="head">
       <h2>Found the following tokens:</h2>
 	  <: include 'i/head_icons.tx' :>
     </div>
     <div class="body">
-      <: for results($token_results) -> $token { :>
+      <: for $token_results -> $token { :>
         <: i($token,'search') :>
       <: } :>
     </div>
   </div>
 <: } :>
 
-<: if $token_language_translation_results.count { :>
+<: if $token_language_translation_results { :>
   <div class="content-box translate-overview content-box-toggleclick content-box-click">
     <div class="head">
       <h2>Found the following translations:</h2>
 	  <: include 'i/head_icons.tx' :>
     </div>
     <div class="body">
-      <: for results($token_language_translation_results) -> $token_language_translation { :>
+      <: for $token_language_translation_results -> $token_language_translation { :>
         <: i($token_language_translation,'search') :>
       <: } :>
     </div>

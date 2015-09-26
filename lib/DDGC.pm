@@ -28,6 +28,7 @@ use POSIX;
 use Cache::FileCache;
 use Cache::NullCache;
 use LWP::UserAgent;
+use HTTP::Request;
 use Carp;
 use Data::Dumper;
 use String::Truncate 'elide';
@@ -75,35 +76,6 @@ has config => (
 );
 sub _build_config { DDGC::Config->new }
 
-has js_version => (
-	isa => 'Str',
-	is => 'ro',
-	lazy_build => 1,
-);
-sub _build_js_version {
-	my ( $self ) = @_;
-	my $ROOT_PATH = $self->config->appdir_path;
-
-	# look for ia.js which doesn't exist in the repo.
-	# If it exists then we are building a debug version.
-	# If it doesn't then continue on to return the version
-	# number for release.
-	if( -f "$ROOT_PATH/root/static/js/ia.js"){
-		return '';
-	}
-
-	my $file = "$ROOT_PATH/package.json";
-	my $pkg < io($file);
-	my $json = decode_json($pkg);
-
-	if($json->{'version'} =~ /(\d+)\.(\d+)\.(\d+)/){
-		my $version = $2 - 1;
-		return qq($1.$version.$3);
-	} else {
-		$self->errorlog("Unable to ascertain JS version from $ROOT_PATH/package.json");
-		return '';
-	}
-}
 
 ####################################################################
 
@@ -113,7 +85,11 @@ has http => (
 	lazy_build => 1,
 );
 sub _build_http {
-	my $ua = LWP::UserAgent->new;
+	my $ua = LWP::UserAgent->new(
+	($ENV{DDGC_PROSODY_USERHOST} ne 'dukgo.com')
+		? ( ssl_opts => { verify_hostname => 0 } )
+		: (),
+	);
 	$ua->timeout(5);
 	my $agent = (ref $_[0] ? ref $_[0] : $_[0]).'/'.$VERSION;
 	$ua->agent($agent);
@@ -126,7 +102,6 @@ has uuid => (
 );
 sub _build_uuid { Data::UUID->new };
 sub uid { md5_hex $_[0]->uuid->create_str . rand };
-
 
 ############################################################
 #  ____        _    ____            _
@@ -352,17 +327,6 @@ sub _build_xslate {
 			# Mark text as raw HTML
 			r => sub { mark_raw(@_) },
 
-			# trick function for DBIx::Class::ResultSet
-			results => sub {
-				my ( $rs, $sorting, $order ) = @_;
-				my @results = $rs->all;
-				$sorting
-					? ( ($order // '') eq 'asc' )
-						? [ sort { $a->$sorting <=> $b->$sorting } @results ]
-						: [ sort { $b->$sorting <=> $a->$sorting } @results ]
-					: [ @results ];
-			},
-
 			# general functions avoiding xslates problems
 			call => sub {
 				my $thing = shift;
@@ -381,7 +345,12 @@ sub _build_xslate {
 				$source =~ s/$from/$to/g;
 				return $source;
 			},
-			urify => sub { lc(join('-',split(/\s+/,join(' ',@_)))) },
+			urify => sub {
+                my $value = shift;
+                $value = lc $value;
+                $value =~ s/[^a-zA-Z]+/-/g;
+                return $value;
+            },
 
 			floor => sub { floor($_[0]) },
 			ceil => sub { ceil($_[0]) },
@@ -605,24 +574,6 @@ sub template_styles {{
 
 ##############################
 
-##################################################
-#  ____       _           ____             _
-# |  _ \ ___ | |__   ___ |  _ \ _   _  ___| | __
-# | |_) / _ \| '_ \ / _ \| | | | | | |/ __| |/ /
-# |  _ < (_) | |_) | (_) | |_| | |_| | (__|   <
-# |_| \_\___/|_.__/ \___/|____/ \__,_|\___|_|\_\
-
-has roboduck => (
-    isa => 'Net::AIML',
-    is => 'ro',
-    lazy_build => 1,
-);
-sub _build_roboduck {
-    my ( $self ) = @_;
-    Net::AIML->new( botid => $self->config->roboduck_aiml_botid );
-}
-##################################################
-
 has forum => (
     isa => 'DDGC::Forum',
     is => 'ro',
@@ -653,18 +604,6 @@ sub _build_idea { DDGC::Ideas->new( ddgc => shift ) }
 #
 # ======== User ====================
 #
-
-sub all_roles {
-	my ( $self, $arg ) = @_;
-	my %roles = (
-		translation_manager => "Translation Manager",
-		forum_manager => "Community Leader (Forum Manager)",
-		idea_manager => "Instant Answer Manager",
-	);
-	return defined $arg
-		? $roles{$arg}
-		: \%roles;
- }
 
 has current_user => (
   isa => 'DDGC::DB::Result::User',

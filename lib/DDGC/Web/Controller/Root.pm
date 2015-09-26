@@ -5,6 +5,7 @@ use Moose;
 use Path::Class;
 use DateTime;
 use DateTime::Duration;
+use URI;
 
 use namespace::autoclean;
 
@@ -27,7 +28,13 @@ sub base :Chained('/') :PathPart('') :CaptureArgs(0) {
 		$c->response->header('Cache-Control' => 'no-cache, max-age=0, must-revalidate, no-store');
 		$c->d->current_user($c->user);
 
-		if ($c->user->data && $c->user->data->{invalidate_existing_sessions} && $c->session->{action_token} ne $c->user->data->{password_reset_session_token}) {
+		if (
+			$c->user->data &&
+			$c->user->data->{invalidate_existing_sessions} &&
+			time < $c->user->data->{invalidate_existing_sessions_timestamp} + (60 * 60 * 24) &&
+			( !$c->user->data->{post_invalidation_tokens} ||
+			  !grep { $_ eq $c->session->{action_token} } @{ $c->user->data->{post_invalidation_tokens} } )
+		) {
 			$c->stash->{not_last_url} = 1;
 			$c->logout;
 			$c->delete_session;
@@ -69,23 +76,11 @@ sub base :Chained('/') :PathPart('') :CaptureArgs(0) {
 	$c->stash->{is_view} = $c->d->is_view;
 	$c->stash->{is_dev} = ( $c->d->is_live || $c->d->is_view ) ? 1 : 0;
 	$c->stash->{errors} = [];
-    $c->stash->{js_version} = $c->d->js_version;
+    $c->stash->{js_version} = $c->d->config->js_version;
 
 	$c->set_new_action_token unless defined $c->session->{action_token};
 	$c->check_action_token;
 	$c->wiz_check;
-
-	$c->response->header( 'X-Frame-Options' => 'DENY' );
-	$c->response->header( 'Content-Security-Policy' => "default-src 'self' ; img-src 'self' https://*.duckduckgo.com https://duckduckgo.com ; script-src 'self' 'unsafe-inline' ; style-src 'self' 'unsafe-inline' ;" );
-
-	# Should not be necessary, is not harmful
-	$c->response->header( 'X-Permitted-Cross-Domain-Policies' => 'master-only' );
-
-	# IE Only
-	$c->response->header( 'X-Content-Type-Options' => 'nosniff' );
-	$c->response->header( 'X-Download-Options' => 'noopen' );
-	$c->response->header( 'X-XSS-Protection' => "1; 'mode=block'" );
-
 
 	$c->stash->{action_token} = $c->session->{action_token};
 
@@ -98,103 +93,7 @@ sub captcha :Chained('base') :Args(0) {
 	$c->create_captcha();
 }
 
-sub country_flag :Chained('base') :Args(2) {
-	my ( $self, $c, $size, $country_code ) = @_;
-	$c->stash->{not_last_url} = 1;
-	if ($country_code =~ m/(\w+)\.png$/) {
-		$country_code = $1;
-	}
-	my $country = $c->d->rs('Country')->find({ country_code => $country_code });
-	unless ($country) {
-		$c->response->status(404);
-		$c->response->body("Not found");
-		return $c->detach;
-	}
-	$c->serve_static_file($country->flag($size));
-}
-
 sub editortest :Chained('base') :Args(0) {}
-
-sub generated_css :Chained('base') :Args(1) {
-	my ( $self, $c, $filename ) = @_;
-	$c->stash->{not_last_url} = 1;
-	my $file = file($c->d->config->cachedir,'generated_css',$filename)->stringify;
-	if (-f $file) {
-		$c->serve_static_file($file);
-		return;
-	}
-	$c->response->status(404);
-	$c->response->body("Not found");
-	return $c->detach;
-}
-
-sub ddgc_static :Chained('base') :Args {
-	my ( $self, $c, @args ) = @_;
-	$c->stash->{not_last_url} = 1;
-	my $file = file($c->d->config->ddgc_static_path,@args)->stringify;
-	if (-f $file) {
-		$c->serve_static_file($file);
-		return;
-	}
-	$c->response->status(404);
-	$c->response->body("Not found");
-	return $c->detach;
-}
-
-sub generated_images :Chained('base') :Args(1) {
-	my ( $self, $c, $filename ) = @_;
-	$c->stash->{not_last_url} = 1;
-	my $file = file($c->d->config->cachedir,'generated_images',$filename)->stringify;
-	if (-f $file) {
-		$c->serve_static_file($file);
-		return;
-	}
-	$c->response->status(404);
-	$c->response->body("Not found");
-	return $c->detach;
-}
-
-sub media :Chained('base') :Args {
-	my ( $self, $c, @args ) = @_;
-	$c->stash->{not_last_url} = 1;
-	my $filename = join("/",@args);
-	my $mediadir = $c->d->config->mediadir;
-	my $file = file($mediadir,$filename);
-	unless (-f $file) {
-		$c->response->status(404);
-		$c->response->body("Not found");
-		return $c->detach;
-	}
-	$c->serve_static_file($file);
-}
-
-sub thumbnail :Chained('base') :Args {
-	my ( $self, $c, @args ) = @_;
-	$c->stash->{not_last_url} = 1;
-	my $filename = join("/",@args);
-	my $mediadir = $c->d->config->mediadir;
-	my $file = file($mediadir,$filename);
-	unless (-f $file) {
-		$c->response->status(404);
-		$c->response->body("Not found");
-		return $c->detach;
-	}
-	my $thumbnail_dir = dir($c->d->config->mediadir,'thumbnail');
-	my $thumbnail = file($thumbnail_dir,$filename);
-	unless (-f $thumbnail) {
-		my $media = $c->d->rs('Media')->find({ filename => $filename });
-		if ($media) {
-			my $dir = $thumbnail->dir;
-			$dir->mkpath;
-			$media->generate_thumbnail("100x100",$thumbnail);
-		} else {
-			$c->response->status(404);
-			$c->response->body("Not found");
-			return $c->detach;
-		}
-	}
-	$c->serve_static_file($thumbnail);
-}
 
 sub redirect_duckco :Chained('base') :PathPart('topic') :Args(1) {
 	my ( $self, $c, $topic ) = @_;
@@ -214,7 +113,12 @@ sub redirect_duckco :Chained('base') :PathPart('topic') :Args(1) {
 sub redir :Chained('base') :PathPart('redir') :Args(0) {
 	my ( $self, $c ) = @_;
 	$c->stash->{not_last_url} = 1;
-	$c->session->{r_url} = $c->req->param('u');
+	my $u = URI->new( $c->req->param('u') );
+	if ( $u->scheme !~ /^http/i ) {
+		$c->response->redirect($c->chained_uri('Root','index',{ bad_url => 1 }));
+		return $c->detach;
+	}
+	$c->session->{r_url} = $u->canonical;
 	$c->session->{r_referer_validated} = (index($c->req->headers->referer, $c->req->base->as_string) == 0) ? 1 : 0;
 	$c->response->redirect($c->chained_uri('Root','r'));
 	return $c->detach;
@@ -266,10 +170,27 @@ sub end : ActionClass('RenderView') {
 
 sub wear :Chained('base') :PathPart('wear') :Args(0) {
 	my ( $self, $c ) = @_;
+
+	my $host = ($c->req->headers->referer)
+		? lc( URI->new( $c->req->headers->referer )->host )
+		: '';
+
+	my @domains = ( qw/
+		duck.co
+		duckduckgo.com
+	/,  lc( $c->request->env->{HTTP_HOST} =~ s/:.*//r ) );
+
 	$c->stash->{no_breadcrumb} = 1;
+
+	if ( !$c->user && ( !$host || !grep { $_ eq $host } @domains ) ) {
+		$c->response->status(404);
+		push @{$c->stash->{template_layout}}, 'wear404.tx';
+		return $c->detach;
+	}
+
 	$c->stash->{share_page} = 1;
 	$c->session->{last_url} = $c->req->uri;
-	$c->stash->{title} = "DuckDuckGo : Share it + Wear it!";
+	$c->stash->{title} = "DuckDuckGo : Share it & Wear it!";
 	$c->session->{campaign_notification} = undef;
 	$c->stash->{campaign_info} = undef;
 	$c->stash->{share_date} = (DateTime->now + DateTime::Duration->new( days => 30 ))->strftime("%b %e");

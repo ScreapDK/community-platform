@@ -1,4 +1,3 @@
-
 <div class="left ia-index--left">
   <div class="ia-index-container">
     <div id="ia_index_header">
@@ -31,15 +30,15 @@
         </div>
     </div>
 
-    <span class="hide button-group" id="filter_dev_milestone">
-        <a id="ia_dev_milestone-all" class="button dev_milestone is-selected disabled" href="#">
+    <span class="button-group hide" id="filter_dev_milestone">
+        <a id="ia_dev_milestone-all" class="button dev_milestone is-selected" href="#">
             All
         </a>
-        <a id="ia_dev_milestone-live" class="button dev_milestone disabled" href="#">
+        <a id="ia_dev_milestone-live" class="button dev_milestone" href="#">
             Live
         </a>
-        <a id="ia_dev_milestone-down" class="button dev_milestone disabled" href="#">
-            Down
+        <a id="ia_dev_milestone-complete" class="button dev_milestone" href="#">
+            Coming Soon
         </a>
     </span>
 
@@ -89,7 +88,7 @@
             </li>
             <: for $topic_list -> $topic { :>
                 <li class="row">
-                    <a id="ia_topic-<: $topic.id :>" href="#">
+                    <a id="ia_topic-<: $topic.id :>" class="ia_topic-<: urify($topic.name) :>" href="#">
                         <: $topic.name :>
                     </a>
                 </li>
@@ -146,3 +145,4 @@
 </div>
 
 <span class="clearfix"></span>
+

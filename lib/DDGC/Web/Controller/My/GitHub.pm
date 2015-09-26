@@ -7,7 +7,9 @@ use DDGC::GitHub::Plugin;
 BEGIN {extends 'Catalyst::Controller'; }
 
 sub base :Chained('/my/logged_in') :PathPart('github') :CaptureArgs(0) {
+	return;
 	my ( $self, $c ) = @_;
+	$c->require_action_token;
 	$c->stash->{title} = 'GitHub';
 	$c->add_bc($c->stash->{title}, '');
 	$c->stash->{github_client_id} = $c->d->config->github_client_id;

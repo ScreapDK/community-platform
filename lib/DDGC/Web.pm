@@ -8,10 +8,10 @@ use Catalyst::Runtime 5.90;
 
 use Catalyst qw/
     ConfigLoader
+    Session
+    Session::State::PSGI
+    Session::Store::PSGI
     Static::Simple
-	Session
-	Session::Store::File
-	Session::State::Cookie
 	Authentication
 	Authorization::Roles
 	ChainedURI
@@ -53,7 +53,7 @@ __PACKAGE__->config(
 	},
 	'Plugin::ErrorCatcher::Email' => {
 		to => $ENV{DDGC_ERROR_EMAIL} // 'ddgc@duckduckgo.com',
-		from => 'noreply@dukgo.com',
+		from => 'noreply@duck.co',
 		subject => '[DuckDuckGo Community] %p %l CRASH!!!',
 		use_tags => 1,
 	},
@@ -82,12 +82,6 @@ __PACKAGE__->config(
 		'content-type' => 'text/html; charset=utf-8',
 		'view-name' => 'Xslate',
 		'response-status' => 500,
-	},
-	'Plugin::Session' => {
-		cookie_secure   => 2,
-		cookie_httponly => 1,
-		expires => 21600,
-		defined $ENV{DDGC_TMP} ? ( storage => $ENV{DDGC_TMP} ) : (),
 	},
 	'Plugin::Captcha' => {
 		session_name => 'captcha_string',
@@ -277,6 +271,52 @@ sub finalize_error {
 	$c->stash->{log_reference} = $c->d->errorlog($msg);
 	$c->next::method();
 }
+
+sub _apply_session_to_req {
+	my ( $c, $req ) = @_;
+	$req->header(
+		Cookie => 'ddgc_session=' . $c->req->env->{'psgix.session.options'}->{id},
+	);
+}
+sub _ref_to_uri {
+	my ( $route ) = @_;
+	my $service = '/' . lc( shift @{$route} ) . '.json';
+	my ( $uri ) = join  '/', @{$route};
+	return "$service/$uri";
+}
+
+sub ddgcr_get {
+	my ( $c, $route, $params ) = @_;
+	$route = _ref_to_uri( $route ) if ( ref $route eq 'ARRAY' );
+
+	my $req = HTTP::Request->new(
+		GET => $c->uri_for( $route, $params )->canonical
+	);
+	$c->_apply_session_to_req( $req );
+
+	my $res = $c->d->http->request( $req );
+	$res->{ddgcr} = JSON::from_json( $res->decoded_content, { utf8 => 1 } );
+	return $res;
+}
+
+sub ddgcr_post {
+	my ( $c, $route, $data ) = @_;
+	$route = _ref_to_uri( $route ) if ( ref $route eq 'ARRAY' );
+
+	$data = JSON::to_json($data, { convert_blessed => 1, utf8 => 1 }) if ref $data;
+	my $req = HTTP::Request->new(
+		POST => $c->uri_for( $route )->canonical
+	);
+	$req->content_type( 'application/json' );
+	$req->content( $data );
+	$c->_apply_session_to_req( $req );
+
+	my $res = $c->d->http->request( $req );
+	$res->{ddgcr} = JSON::from_json( $res->decoded_content, { utf8 => 1 } );
+	return $res;
+}
+
+
 
 # Start the application
 __PACKAGE__->setup();
