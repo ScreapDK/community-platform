@@ -1,21 +1,23 @@
 (function(env) {
     // Handlebars helpers for IA Pages
-    
+
+    // Return the string correctly formatted with newlines
+    Handlebars.registerHelper("newlines", function(string) {
+        string = string.replace(/\n/g, "<br />");
+
+        return new Handlebars.SafeString(string);
+    });
+
     // Return elapsed time expressed as days from now (e.g. 5 days, 1 day, today)
-    Handlebars.registerHelper("timeago", function(date) {
+    Handlebars.registerHelper("timeago", function(date, full) {
+        var timestring = full? " days ago" : "d";
         if (date) {
             // expected date format: YYYY-MM-DDTHH:mm:ssZ e.g. 2011-04-22T13:33:48Z
             date = date.replace("/T.*Z/", " ");
             date = moment.utc(date, "YYYY-MM-DD");
             
             var elapsed = parseInt(moment().diff(date, "days", true));
-            if (elapsed === 1) {
-                date = elapsed + " day";
-            } else if (!elapsed) {
-                date = "today";
-            } else {
-                date = elapsed + " days";
-            }
+            date = elapsed + timestring;
 
             return date;
         }
@@ -193,7 +195,7 @@
 
     // Strip non-alphanumeric chars from a string and transform it to lowercase
     Handlebars.registerHelper('slug', function(txt) {
-        txt = txt.toLowerCase().replace(/[^a-z0-9]/g, '');
+        txt = txt? txt.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
         return txt;
     });
 
@@ -218,6 +220,15 @@
         value = parseInt(value);
         if (!value) {
             return options.fn(this);
+        }
+    });
+
+    // Returns true if any value in the array is false
+    Handlebars.registerHelper('is_false_array', function(val1, val2, val3, val4, val5, val6, options) {
+        if ((!val1) || (!val2) || (!val3) || (!val4) || (!val5) || (!(val6 && val6.length))) {
+            return options.fn(this);
+        } else {
+            return options.inverse(this);
         }
     });
 
@@ -273,4 +284,60 @@
              return options.fn(this);
         }
     });
+
+    // return the length of an array
+    Handlebars.registerHelper('length', function(obj) {
+        if(Array.isArray(obj)){
+            return obj.length;
+        }
+    });
+
+    // return sum of up to 4 values
+    Handlebars.registerHelper('sum', function(v1, v2, v3, v4) {
+        var values = [v1, v2, v3, v4];
+        var total = 0;
+        for(var i = 0; i < values.length; i++){
+            if( typeof values[i] == 'number' ){
+                total += values[i];
+            }
+        }
+        return total;
+    });
+
+    // return total number of IAs since a given number of days
+    // obj: array of IA objects
+    // days: int
+    // operator: 'less-than' 'greater-than'
+    Handlebars.registerHelper('stats_from_day', function(obj, days, operator) {
+        var calc = function(date, operator) {
+            var days_from = function(tmpdate){
+                var dateObj = moment.utc(tmpdate, "YYYY-MM-DD");
+                var elapsed = parseInt(moment().diff(dateObj, "days", true));
+                return elapsed;
+            };
+
+            if(operator == 'less-than'){
+                if(days_from(date) < days){
+                    return 1;
+                }
+            }
+            if(operator == 'greater-than'){
+                if(days_from(date) > days){
+                    return 1;
+                }
+            }
+            
+        };
+
+        var total = 0;
+        if(obj){
+            for(var i = 0; i < obj.length; i++){
+                if( calc(obj[i].created_date, operator) ){
+                        total++;
+                }
+            }
+        }
+        return total;
+    });
+
 })(DDH);

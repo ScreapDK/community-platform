@@ -5,6 +5,7 @@ use Moose;
 use Path::Class;
 use DateTime;
 use DateTime::Duration;
+use DateTime::Format::Mail;
 use URI;
 
 use namespace::autoclean;
@@ -25,7 +26,6 @@ sub base :Chained('/') :PathPart('') :CaptureArgs(0) {
 	}
 
 	if ($c->user) {
-		$c->response->header('Cache-Control' => 'no-cache, max-age=0, must-revalidate, no-store');
 		$c->d->current_user($c->user);
 
 		if (
@@ -171,22 +171,9 @@ sub end : ActionClass('RenderView') {
 sub wear :Chained('base') :PathPart('wear') :Args(0) {
 	my ( $self, $c ) = @_;
 
-	my $host = ($c->req->headers->referer)
-		? lc( URI->new( $c->req->headers->referer )->host )
-		: '';
-
-	my @domains = ( qw/
-		duck.co
-		duckduckgo.com
-	/,  lc( $c->request->env->{HTTP_HOST} =~ s/:.*//r ) );
+	$c->session->{wear_referer} = lc( $c->req->headers->referer ) if !$c->session->{wear_referer};
 
 	$c->stash->{no_breadcrumb} = 1;
-
-	if ( !$c->user && ( !$host || !grep { $_ eq $host } @domains ) ) {
-		$c->response->status(404);
-		push @{$c->stash->{template_layout}}, 'wear404.tx';
-		return $c->detach;
-	}
 
 	$c->stash->{share_page} = 1;
 	$c->session->{last_url} = $c->req->uri;
@@ -213,6 +200,18 @@ sub wear :Chained('base') :PathPart('wear') :Args(0) {
 			}
 		}
 	}
+}
+
+sub status :Chained('base') :PathPart('status') :Args(0) {
+	my ( $self, $c ) = @_;
+	$c->add_bc('Community Platform Status');
+	my $dt_now = DateTime->now;
+	#$dt_now->formatter( DateTime::Format::Mail->new );
+	$c->stash->{title}   = "Community Platform Status",
+	$c->stash->{dt_utc}  = DateTime::Format::Mail->format_datetime( $dt_now );
+	$c->stash->{version} = $DDGC::VERSION;
+	$c->stash->{db}      = eval { $c->d->rs('User')->one_row; };
+	$c->stash->{prosody} = eval { $c->d->xmpp->mod_data_access->get('ddgc') };
 }
 
 sub error :Chained('base') :PathPart('error') :Args(0) {

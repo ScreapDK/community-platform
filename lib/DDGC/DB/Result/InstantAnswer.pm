@@ -12,6 +12,13 @@ use JSON;
 table 'instant_answer';
 
 sub u { [ 'InstantAnswer', 'view', $_[0]->id ] }
+sub uri {
+    my ( $self, $params ) = @_;
+    $self->ddgc->uri_for(
+        sprintf( '/ia/view/%s', $self->meta_id ),
+        $params
+    );
+}
 
 column id => {
 	data_type => 'text',
@@ -37,7 +44,8 @@ column name => {
 column description => {
 	data_type => 'text',
 	is_nullable => 1,
-    for_endpt => 1
+    for_endpt => 1,
+    pipeline => 1
 };
 
 # JSON string cointaining parameters such as
@@ -52,7 +60,8 @@ column answerbar => {
 column perl_module => {
 	data_type => 'text',
 	is_nullable => 1,
-    for_endpt => 1
+    for_endpt => 1,
+    pipeline => 1
 };
 
 # JSON array of dependencies
@@ -177,7 +186,8 @@ column triggers => {
 column example_query => {
 	data_type => 'text',
 	is_nullable => 1,
-    for_endpt => 1
+    for_endpt => 1,
+    pipeline => 1
 };
 
 # json, aka secondary queries
@@ -280,6 +290,7 @@ column design_review => {
 column test_machine => {
     data_type => 'text',
     is_nullable => 1,
+    pipeline => 1
 };
 
 # test results on IE 8
@@ -405,8 +416,48 @@ column last_update => {
     pipeline => 1
 };
 
+column all_comments => {
+    data_type => 'text',
+    is_nullable => 1,
+    is_json => 1,
+    pipeline => 1
+};
+
+column at_mentions => {
+    data_type => 'text',
+    is_nullable => 1,
+    is_json => 1,
+    pipeline => 1
+};
+
+column updated => {
+    data_type => 'timestamp with time zone',
+    set_on_create => 1,
+    set_on_update => 1,
+};
+
+	
+# Latest release in which an IA was updated
+column release_version => {
+    data_type => 'numeric',
+    is_nullable => 1,
+};
+
+# Is it live or not?
+column deployment_state => {
+    data_type => 'varchar',
+    size => 15,
+    is_nullable => 1,
+};
+
+column blockgroup => {
+	data_type => 'varchar',
+	size => 20,
+	is_nullable => 1,
+	for_endpt => 1
+};
+
 has_many 'issues', 'DDGC::DB::Result::InstantAnswer::Issues', 'instant_answer_id';
-has_many 'blocks', 'DDGC::DB::Result::InstantAnswer::Blocks', 'instant_answer_id';
 has_many 'updates', 'DDGC::DB::Result::InstantAnswer::Updates', 'instant_answer_id';
 has_many 'ideas', 'DDGC::DB::Result::Idea', 'instant_answer_id';
 
@@ -416,6 +467,10 @@ many_to_many 'users', 'instant_answer_users', 'user';
 has_many 'instant_answer_topics', 'DDGC::DB::Result::InstantAnswer::Topics', 'instant_answer_id';
 many_to_many 'topics', 'instant_answer_topics', 'topic';
 
+has_many 'release_versions', 'DDGC::DB::Result::ReleaseVersion', 'instant_answer_id';
+
+has_one 'blockgroup', 'DDGC::DB::Result::InstantAnswer::Blockgroup', 'blockgroup';
+
 after insert => sub {
     my ( $self ) = @_;
     my $schema = $self->result_source->schema;
@@ -424,10 +479,38 @@ after insert => sub {
         meta2        => join('', map { sprintf ':%s:', $_ }
             $self->topics->columns([qw/ name /])->all),
         description  => sprintf('Instant Answer Page [%s](%s) created!',
-            $self->name, sprintf('https://duck.co/ia/view/%s',
-                $self->meta_id)),
+            $self->name, $self->uri( { activity_feed => 1 } ) ),
     } );
 };
+
+sub create_update_activity {
+    my ( $self, $meta3, $description ) = @_;
+    $self->result_source->schema->resultset('ActivityFeed')->updated_ia( {
+        meta1        => $self->id,
+        meta2        => $self->topics->join_for_activity_meta( 'name' ),
+        meta3        => $meta3,
+        description  => $description,
+    } );
+}
+
+sub _generate_updates {
+    my ( $self, $update ) = @_;
+
+    while ( my ($column, $value) = each $update ) {
+
+        if ( $column eq 'dev_milestone' ) {
+            $self->create_update_activity(
+                $column,
+                sprintf( 'Instant Answer [%s](%s) dev milestone changed to %s',
+                    $self->name,
+                    $self->uri( { from => 'notification' } ),
+                    $value
+                ),
+            );
+        }
+
+    }
+}
 
 around update => sub {
     my ( $next, $self, @extra ) = @_;
@@ -437,35 +520,10 @@ around update => sub {
     return $ret if (!$ret);
     return $ret if $ENV{DDGC_IA_AUTOUPDATES};
 
-    my $meta3 = _updates_to_meta( $extra[0] );
-
-    if ($meta3) {
-        my $schema = $self->result_source->schema;
-        $schema->resultset('ActivityFeed')->updated_ia( {
-            meta1        => $self->id,
-            meta2        => $self->topics->join_for_activity_meta( 'name' ),
-            meta3        => $meta3,
-            description  => sprintf('Instant Answer Page [%s](%s) updated!',
-                $self->name, sprintf('https://duck.co/ia/view/%s',
-                    $self->meta_id)),
-        } );
-    }
+    $self->_generate_updates( $update );
 
     return $ret;
 };
-
-sub _updates_to_meta {
-    my ( $updates ) = @_;
-    my $meta;
-    while ( my ($column, $value) = each $updates ) {
-        # Add updates we are not interested in to this array
-        next if grep { $column eq $_ }
-            (qw/ created_date /);
-        $meta .= sprintf ':%s:',
-            join ',', ( $column, $value );
-    }
-    return $meta;
-}
 
 # returns a hash ref of all IA data.  Same idea as hashRefInflator
 # but this takes care of deserialization for you.

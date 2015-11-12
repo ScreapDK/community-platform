@@ -72,7 +72,11 @@ sub rootdir {
 	return File::Spec->rel2abs( $dir );
 }
 
-has_conf web_base => DDGC_WEB_BASE => 'https://duck.co';
+has_conf web_base => DDGC_WEB_BASE => sub {
+	( $_[0]->is_live )
+		? 'https://duck.co'
+		: 'https://view.dukgo.com';
+};
 
 sub prosody_db_samplefile { File::Spec->rel2abs( File::Spec->catfile( dist_dir('DDGC'), 'ddgc.prosody.sqlite' ) ) }
 sub duckpan_cdh_template { File::Spec->rel2abs( File::Spec->catfile( dist_dir('DDGC'), 'perldoc', 'duckpan.html' ) ) }
@@ -336,13 +340,16 @@ sub campaigns {
 			id => 1,
 			active => 1,
 			notification_active => 0,
-			min_length => 20,
+			min_length => 45,
 			url => '/wear/',
 			notification => "Help share DuckDuckGo! Find out more...",
-			question1 => "How did you hear about DuckDuckGo?",
+			question1 => "How did you hear about DuckDuckGo? (Try to be as descriptive as possible)",
 			question2 => "How long have you been a DuckDuckGo user?",
 			question3 => "Is this your first time spreading DuckDuckGo to others?",
-			question4 => "Share your email so that we can send updates on your DuckDuckGo T-shirt.",
+			question4 => "Are you the kind of person that can really convert at least 3 users, to help your friends take back their privacy?",
+			question5 => "What is you favourite <a href=\"https://duck.co/ia/\">IA</a>?",
+			question6 => "What is you favourite <a href=\"https://duckduckgo.com/bang\">!bang</a>?",
+			question7 => "Share your email so that we can send updates on your DuckDuckGo T-shirt.",
 		},
 		share_followup => {
 			id => 2,
